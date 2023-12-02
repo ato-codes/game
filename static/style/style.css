@@ -1,0 +1,27 @@
+:root {
+  --scale: 1000px ;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+#playground {
+  position: relative;
+  border: 1px solid black;
+}
+#playground #player-cam {
+  position: absolute;
+  width: 95vw;
+  height: 95vh;
+  border: 5px solid red;
+  transition: 0.5s;
+  margin: 5px;
+}
+
+body {
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+}/*# sourceMappingURL=style.css.map */
