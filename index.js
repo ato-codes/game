@@ -3,7 +3,6 @@ const express = require("express");
 const port = 3000 || process.env.PORT;
 const app = express();
 const { WebSocketServer } = require("ws");
-const { EventEmitter } = require("events");
 const http = require("http");
 const server = http.createServer(app);
 
@@ -11,7 +10,6 @@ app.use(express.json());
 app.use(express.static("./static"));
 
 const wss = new WebSocketServer({ server });
-const event = new EventEmitter();
 
 let players = [];
 
@@ -36,26 +34,62 @@ const create_new_player = () => {
   return players;
 };
 
+var connections = {};
+var host;
+
+function hostUpdate() {
+  if (host != undefined)
+    host.send(JSON.stringify({ req: "host_request", data: players }));
+}
+
+setInterval(hostUpdate, 1000);
+
 wss.on("connection", (ws) => {
   const stringify = (data) => JSON.stringify(data);
   const parseJson = (data) => JSON.parse(data);
 
+  ws.onclose = () => {
+    delete connections[
+      Object.keys(connections).find((k) => connections[k] == ws)
+    ];
+    if (ws == host) {
+      host = undefined;
+    }
+    if (Object.keys(connections).length > 0) {
+      host =
+        Object.entries(connections)[
+          Math.floor(Math.random() * Object.keys(connections).length)
+        ][1];
+    }
+  };
+
   ws.on("message", (msg) => {
     const { req, data } = parseJson(msg);
-    if (req == "init") {
-      ws.send(stringify({ req: "init", data: create_new_player() }));
-    }
-    if (req == "player_pos") {
-      const { x, y, id } = parseJson(data);
-      players = players.map((player) => {
-        if (player.id == id) {
-          player.x = x;
-          player.y = y;
-        }
-      });
 
-      ws.send(stringify({ req: "player_pos", data: players }));
+    if (req == "player_spawned") {
+      if (host == undefined) host = ws;
+      connections[data.id] = ws;
+      hostUpdate();
     }
+
+    for (var conn in connections) {
+      if (conn != data.id) connections[conn].send(msg);
+    }
+    /*if (req == "init") {
+            ws.send(stringify({ req: "init", data: create_new_player() }));
+        }
+
+        if (req == "player_pos") {
+            const { x, y, id } = parseJson(data);
+            players = players.map((player) => {
+                if (player.id == id) {
+                player.x = x;
+                player.y = y;
+                }
+            });
+
+            ws.send(stringify({ req: "player_pos", data: players }));
+        }*/
   });
 
   setInterval(() => {

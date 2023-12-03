@@ -7,6 +7,12 @@ class Rect {
     this.health = 100;
   }
 
+  respawn() {
+    this.x = Math.random()*WIDTH
+    this.y = Math.random()*HEIGHT
+    this.health = 100
+  }
+
   intersects(x, y) {
     return (
       x >= this.x &&
@@ -20,8 +26,8 @@ class Rect {
   }
 
   update() {
-    var xVel = (keys['ArrowRight'] || false) - (keys['ArrowLeft'] || false)
-    var yVel = (keys['ArrowDown'] || false) - (keys['ArrowUp'] || false)
+    var xVel = (keys['ArrowRight'] || keys['KeyD'] || false) - (keys['ArrowLeft'] || keys['KeyA'] || false)
+    var yVel = (keys['ArrowDown'] || keys['KeyS'] || false) - (keys['ArrowUp'] || keys['KeyW'] || false)
 
     this.x += xVel * PLAYER_SPEED
     for (var w in walls) {
@@ -35,12 +41,18 @@ class Rect {
         this.y -= yVel * PLAYER_SPEED
       }
     }
-    if (Math.random() < 1) this.shoot(Math.random()*canvas.width, Math.random()*canvas.height)
+    if (keys["click"]) this.shoot(keys["mouse x"] || 0, keys["mouse y"] || 0)
+    if (this.health < 0) this.respawn()
+  }
+  toObject() {
+    return {x:this.x, y:this.y, h:this.health}
   }
 
   shoot(mouseX, mouseY) {
     var angle = Math.atan2(mouseY - canvas.height/2, mouseX-canvas.width/2)
-    bullets.push(new Bullet("normal", this.x + BLOCK_SIZE/2, this.y + BLOCK_SIZE/2, BULLET_SPEED*Math.cos(angle), BULLET_SPEED*Math.sin(angle)))
+    var b = new Bullet("normal", this.x + BLOCK_SIZE/2, this.y + BLOCK_SIZE/2, BULLET_SPEED*Math.cos(angle), BULLET_SPEED*Math.sin(angle))
+    send("bullet_spawned", {type:b.type, x: b.x, y: b.y, xVel: b.xVel, yVel: b.yVel})
+    bullets.push(b)
   }
 }
 
@@ -52,6 +64,7 @@ class Bullet {
     this.xVel = xVel;
     this.yVel = yVel
     this.damage = 10
+    this.myBullet = true
   }
 
   update() {
@@ -64,18 +77,28 @@ class Bullet {
         return true;
       }
     }
+    for (var p in players) {
+      if (players[p].intersects(this.x, this.y) && this.playerId != players[p].id) {
+        return true;
+      }
+    }
+    if (!this.myBullet && player.intersects(this.x, this.y)) {
+      player.health -= this.damage
+      return true;
+    }
 
     return this.x < 0 || this.y < 0 || this.x > WIDTH || this.y > HEIGHT
   }
 }
 
 const BLOCK_SIZE = 50;
+const WALL_REGEN_TIME = 30000
 const BULLET_SIZE = 10;
 
 const BULLET_SPEED = 460/60;
 const PLAYER_SPEED = 160/60;
 
-var WIDTH = 3000, HEIGHT = 3000;
+var WIDTH = 4000, HEIGHT = 4000;
 var camera = {x : WIDTH/2, y: HEIGHT/2}
 var player = new Rect(WIDTH/2, HEIGHT/2, BLOCK_SIZE, BLOCK_SIZE)
 player.id = Math.round(Math.random()*100000000)
@@ -90,6 +113,21 @@ function handleKeyDown(event) {
 function handleKeyUp(event) {
   keys[event.code]= false
 }
+function handleMouseDown(event) {
+  keys["click"]= true
+}
+
+function handleMouseUp(event) {
+  keys["click"]= false
+}
+function handleMouseMove(event) {
+  keys["mouse x"]= event.clientX
+  keys["mouse y"]= event.clientY
+}
+
+canvas.addEventListener("mousedown", handleMouseDown);
+canvas.addEventListener("mousemove", handleMouseMove);
+canvas.addEventListener("mouseup", handleMouseUp);
 canvas.addEventListener('keydown', handleKeyDown);
 canvas.addEventListener('keyup', handleKeyUp);
 canvas.setAttribute('tabindex', '0');
@@ -134,7 +172,7 @@ const gameUpdate = () => {
 
   player.update();
   
-  socket.send(stringify({ req: "player_moved", data: {id: player.id, x: player.x, y: player.y} }));
+  send("player_moved", {x: player.x, y: player.y});
 
   camera.x = player.x
   camera.y = player.y
@@ -143,12 +181,25 @@ const gameUpdate = () => {
   gameDraw()
 }
 
+const send = (req, data) => {
+  if (connected) {
+    socket.send(stringify({req: req, data: {id:player.id, ...data}}))
+  }
+}
+
+const HEALTHBAR_X = 40, HEALTH_BAR_Y = 40, HEALTHBAR_HEIGHT = 30, HEALTHBAR_WIDTH = 450
+
 const gameDraw = () => {
   cxt.save();
   cxt.translate(Math.round((-camera.x-BLOCK_SIZE/2)+canvas.width/2), Math.round((-camera.y-BLOCK_SIZE/2)+canvas.height/2))
 
   cxt.fillStyle = "blue"
   cxt.fillRect(player.x, player.y, player.width, player.height)
+
+  cxt.fillStyle = "green"
+  for (var p in players) {
+    cxt.fillRect(players[p].x, players[p].y, player.width, player.height)
+  }
 
   cxt.fillStyle = "red"
   for (var b in bullets) {
@@ -160,35 +211,48 @@ const gameDraw = () => {
     cxt.fillRect(walls[w].x, walls[w].y, BLOCK_SIZE, BLOCK_SIZE)
   }
 
-
   cxt.restore();
+
+  // UI
+
+  cxt.fillStyle = "green"
+  cxt.fillRect(HEALTHBAR_X-2, HEALTH_BAR_Y-2, HEALTHBAR_WIDTH+4, HEALTHBAR_HEIGHT+4)
+
+  cxt.fillStyle = "rgb(0,160,0)"
+  cxt.fillRect(HEALTHBAR_X, HEALTH_BAR_Y, HEALTHBAR_WIDTH*player.health/100, HEALTHBAR_HEIGHT)
+
+
 }
 setInterval(gameUpdate, 1000/60);
 generateWalls()
 
+var lastGeneratedWalls = Date.now();
+
 var connected = false
-const socket = new WebSocket("ws://localhost:3000");
+const socket = new WebSocket("ws://192.168.1.14:3000");
 const stringify = (data) => JSON.stringify(data);
 const parseJson = (data) => JSON.parse(data);
 
 socket.onopen = () => {
   connected = true;
-  socket.send(stringify({ req: "player_spawned", data: {id: player.id, x: player.x, y: player.y} }));
+  send("player_spawned", {x: player.x, y: player.y});
 };
 
-socket.onmessage = (res) => {
-  const { req, data } = parseJson(res.data);
+socket.onmessage = async (res) => {
+  var d = res.data
+  if (d.text) d = await d.text()
+  d = parseJson( d)
   
-  if (req == "init") {
-    loadInitData(data)
-  }
-
+  const { req, data } = d;
+  
   if (req == "bullet_spawned") {
     onBulletSpawn(data);
   }
-
-  if (req == "walls_spawned") {
-    onWallsSpawn(data);
+  if (req == "host_request") {
+    hostUpdate();
+  }
+  if (req == "init") {
+    loadInitData(data)
   }
 
   if (req == "player_spawned") {
@@ -197,7 +261,41 @@ socket.onmessage = (res) => {
   if (req == "player_moved") {
     onPlayerMove(data);
   }
+  if (req == "host") {
+    synchroninizeWithHost(data);
+  }
+
 };
+
+
+const hostUpdate = () => {
+  if (Date.now() - lastGeneratedWalls > WALL_REGEN_TIME) {
+    generateWalls();
+    lastGeneratedWalls = Date.now()
+  }
+  
+  
+  var data = {}
+  data.walls = []
+  data.bullets = []
+  for (var b in bullets) {
+
+  }
+  for (var w in walls) {
+    w = walls[w]
+    data.walls.push(w.toObject())
+  }
+  send("host", data)
+}
+const synchroninizeWithHost = (data) => {
+  var newWalls = []
+  for (w in data.walls) {
+    w = data.walls[w]
+    newWalls.push(new Rect(w.x, w.y, BLOCK_SIZE, BLOCK_SIZE))
+    newWalls[newWalls.length-1].health = w.h
+  }
+  walls = newWalls
+}
 
 
 const loadInitData = (data) => {
@@ -206,26 +304,28 @@ const loadInitData = (data) => {
 
 
 const onBulletSpawn = (data) => {
-
-}
-
-
-const onWallsSpawn = (data) => {
-
+  bullets.push(new Bullet(data.type, data.x, data.y, data.xVel, data.yVel))
+  bullets[bullets.length-1].myBullet = false
+  bullets[bullets.length-1].playerId = data.id
 }
 
 
 const onPlayerSpawn = (data) => {
   var p = players.find(pl => pl.id == data.id) || new Rect(data.x, data.y, BLOCK_SIZE, BLOCK_SIZE)
-  players[players.length-1].id = data.id
+  p.id = data.id
   
   if (players.findIndex(pl => p == pl) == -1) players.push(p)
 }
 const onPlayerMove = (data) => {
   var p = players.find(pl => pl.id == data.id)
-  if (p && p.id != player.id) {
-    p.x = data.x
-    p.y = data.y
+  if (p) {
+
+    if(p.id != player.id) {
+      p.x = data.x
+      p.y = data.y
+    }
+  } else {
+    onPlayerSpawn(data)
   }
 }
 
