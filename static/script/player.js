@@ -35,7 +35,7 @@ class Rect {
         this.y -= yVel * PLAYER_SPEED
       }
     }
-    this.shoot(Math.random()*canvas.width, Math.random()*canvas.height)
+    if (Math.random() < 1) this.shoot(Math.random()*canvas.width, Math.random()*canvas.height)
   }
 
   shoot(mouseX, mouseY) {
@@ -78,6 +78,7 @@ const PLAYER_SPEED = 160/60;
 var WIDTH = 3000, HEIGHT = 3000;
 var camera = {x : WIDTH/2, y: HEIGHT/2}
 var player = new Rect(WIDTH/2, HEIGHT/2, BLOCK_SIZE, BLOCK_SIZE)
+player.id = Math.round(Math.random()*100000000)
 var canvas = document.getElementById("canvas")
 var cxt = canvas.getContext('2d')
 
@@ -115,6 +116,7 @@ const generateWalls = () => {
 }
 
 const gameUpdate = () => {
+  if (!connected) return
   cxt.clearRect(0, 0, canvas.width, canvas.height);
 
   for (var i = 0; i < bullets.length; i++) {
@@ -131,6 +133,8 @@ const gameUpdate = () => {
   }
 
   player.update();
+  
+  socket.send(stringify({ req: "player_moved", data: {id: player.id, x: player.x, y: player.y} }));
 
   camera.x = player.x
   camera.y = player.y
@@ -161,6 +165,70 @@ const gameDraw = () => {
 }
 setInterval(gameUpdate, 1000/60);
 generateWalls()
+
+var connected = false
+const socket = new WebSocket("ws://localhost:3000");
+const stringify = (data) => JSON.stringify(data);
+const parseJson = (data) => JSON.parse(data);
+
+socket.onopen = () => {
+  connected = true;
+  socket.send(stringify({ req: "player_spawned", data: {id: player.id, x: player.x, y: player.y} }));
+};
+
+socket.onmessage = (res) => {
+  const { req, data } = parseJson(res.data);
+  
+  if (req == "init") {
+    loadInitData(data)
+  }
+
+  if (req == "bullet_spawned") {
+    onBulletSpawn(data);
+  }
+
+  if (req == "walls_spawned") {
+    onWallsSpawn(data);
+  }
+
+  if (req == "player_spawned") {
+    onPlayerSpawn(data);
+  }
+  if (req == "player_moved") {
+    onPlayerMove(data);
+  }
+};
+
+
+const loadInitData = (data) => {
+  player.id = data.id
+}
+
+
+const onBulletSpawn = (data) => {
+
+}
+
+
+const onWallsSpawn = (data) => {
+
+}
+
+
+const onPlayerSpawn = (data) => {
+  var p = players.find(pl => pl.id == data.id) || new Rect(data.x, data.y, BLOCK_SIZE, BLOCK_SIZE)
+  players[players.length-1].id = data.id
+  
+  if (players.findIndex(pl => p == pl) == -1) players.push(p)
+}
+const onPlayerMove = (data) => {
+  var p = players.find(pl => pl.id == data.id)
+  if (p && p.id != player.id) {
+    p.x = data.x
+    p.y = data.y
+  }
+}
+
 /*
 on message {
 
